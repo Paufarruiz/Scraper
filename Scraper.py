@@ -44,18 +44,32 @@ ids_procesados = set()
 INTERVALO_VIGILANCIA = 30 
 
 def analyze_with_brain(text, fuente):
-    """Nivel 2: Motor Forense"""
+    """Nivel 2: Motor Forense con Jerarquía de Clasificación"""
     with ai_semaphore:
         current_key = next(key_pool)
         client = Groq(api_key=current_key)
         
+        tipos_validos = [
+            "CREDENTIAL_LEAK", 
+            "SOURCE_CODE_EXPOSURE", 
+            "THREAT_INTELLIGENCE_MENTION", 
+            "BRAND_IMPERSONATION",
+            "GENERAL_MENTION"
+        ]
+        
+        # PROMPT REFORZADO CON LÓGICA DE FILTRADO
         prompt_contexto = (
-            f"Eres el sistema ARGUS vigilando para '{NOMBRE_CLIENTE}'. Dominios: {DOMINIOS}. "
-            "Tu objetivo es extraer datos SI Y SOLO SI aparecen en el texto. "
-            "Responde en JSON: "
-            '{"alerta": true/false, "tipo": "string", "claves_filtradas": ["datos_reales"]}. '
-            "REGLA DE ORO: No inventes nada. Si el texto dice 'Pepe', extrae 'Pepe'. "
-            "Si no hay datos claros, deja 'claves_filtradas' como lista vacía []."
+            f"Eres el analista de seguridad de '{NOMBRE_CLIENTE}'. Dominios: {DOMINIOS}.\n"
+            "Clasifica la entrada siguiendo esta JERARQUÍA ESTRICTA:\n"
+            "1. CREDENTIAL_LEAK: SOLO si ves un par Usuario:Password o una contraseña clara. Si solo hay un email o nombre de archivo, NO uses este tipo.\n"
+            "2. THREAT_INTELLIGENCE_MENTION: Úsalo cuando el nombre de la empresa aparezca en repositorios de herramientas de hacking (como FISSURE), listas de objetivos o archivos de texto de terceros.\n"
+            "3. SOURCE_CODE_EXPOSURE: Si ves código que parece pertenecer a la infraestructura interna de la empresa.\n\n"
+            "Responde SOLO en JSON:\n"
+            "{\n"
+            "  'alerta': bool, \n"
+            f"  'tipo': 'Elegir de: {tipos_validos}', \n"
+            "  'claves_filtradas': ['solo datos reales encontrados']\n"
+            "}"
         )
         
         try:
@@ -63,13 +77,12 @@ def analyze_with_brain(text, fuente):
             chat_completion = client.chat.completions.create(
                 messages=[{"role": "system", "content": prompt_contexto}, {"role": "user", "content": text}],
                 model="llama-3.3-70b-versatile",
-                # response_format={"type": "json_object"}, # Asegúrate que el modelo lo soporta
+                response_format={"type": "json_object"},
                 temperature=0,
             )
             return json.loads(chat_completion.choices[0].message.content)
-        except Exception as e:
-            # print(f"Error en IA: {e}")
-            return {"alerta": False, "tipo": "Error", "claves_filtradas": []}
+        except:
+            return {"alerta": False}
 
 def reddit_worker(topic):
     """Vigilancia en Reddit (Título + Cuerpo)"""
